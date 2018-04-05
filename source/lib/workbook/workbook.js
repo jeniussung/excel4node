@@ -152,60 +152,71 @@ class Workbook {
      */
     write(fileName, handler) {
 
-        builder.writeToBuffer(this)
-        .then((buffer) => {
-            switch (typeof handler) {
-                // handler passed as http response object.
+        return new Promise(((resolve, reject) => {
+            builder.writeToBuffer(this)
+                .then((buffer) => {
+                    switch (typeof handler) {
+                        // handler passed as http response object.
 
-            case 'object':
-                if (handler instanceof http.ServerResponse) {
-                    handler.writeHead(200, {
-                        'Content-Length': buffer.length,
-                        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                        'Content-Disposition': 'attachment; filename="' + fileName + '"'
-                    });
-                    handler.end(buffer);
-                } else {
-                    throw new TypeError('Unknown object sent to write function.');
-                }
-                break;
+                        case 'object':
+                            if (handler instanceof http.ServerResponse) {
+                                handler.writeHead(200, {
+                                    'Content-Length': buffer.length,
+                                    'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                                    'Content-Disposition': 'attachment; filename="' + fileName + '"'
+                                });
+                                handler.end(buffer);
+                                resolve();
+                            } else {
+                                throw new TypeError('Unknown object sent to write function.');
+                                reject(new TypeError('Unknown object sent to write function.'));
+                            }
+                            break;
 
-            // handler passed as callback function
-            case 'function':
-                fs.writeFile(fileName, buffer, function (err) {
-                    if (err) {
-                        handler(err);
-                    } else {
-                        fs.stat(fileName, handler);
+                        // handler passed as callback function
+                        case 'function':
+                            fs.writeFile(fileName, buffer, function (err) {
+                                if (err) {
+                                    handler(err);
+                                    reject(err);
+                                } else {
+                                    fs.stat(fileName, handler);
+                                    resolve();
+                                }
+                            });
+                            break;
+
+                        // no handler passed, write file to FS.
+                        default:
+
+                            fs.writeFile(fileName, buffer, function (err) {
+                                if (err) {
+                                    throw err;
+                                    reject(err);
+                                }
+                                resolve();
+                            });
+                            break;
+                    }
+                })
+                .catch((e) => {
+                    if (handler instanceof http.ServerResponse) {
+                        this.logger.error(e.stack);
+                        handler.status = 500;
+                        handler.setHeader('Content-Type', 'text/plain');
+                        handler.end('500 Server Error');
+                        reject(e.stack);
+                    }
+                    else if(typeof handler === 'function') {
+                        handler(e.stack);
+                        reject(e.stack);
+                    }
+                    else {
+                        this.logger.error(e.stack);
+                        reject(e.stack);
                     }
                 });
-                break;
-
-            // no handler passed, write file to FS.
-            default:
-
-                fs.writeFile(fileName, buffer, function (err) {
-                    if (err) {
-                        throw err;
-                    }
-                });
-                break;
-            }
-        })
-        .catch((e) => {
-            if (handler instanceof http.ServerResponse) {
-                this.logger.error(e.stack);
-                handler.status = 500;
-                handler.setHeader('Content-Type', 'text/plain');
-                handler.end('500 Server Error');
-            }
-            else if(typeof handler === 'function') {
-                handler(e.stack);
-            }
-            else {
-                this.logger.error(e.stack);
-            }
-        });
+        }))
     }
 
     /**
